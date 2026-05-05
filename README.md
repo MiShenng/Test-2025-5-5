@@ -56,13 +56,32 @@ is hosted on SwissUbase, which requires institutional registration to download.
 The associated coding pipeline is included here in `enb-mining-castro2025/`.
 Request the dataset directly from SwissUbase if needed.
 
-## Pending sources (not yet fetched)
+## COP / CMP / CMA decision PDFs (in progress)
 
-These are documented in the data plan but were not pulled in this batch:
+`data/raw/cop_decisions/` is being populated by `scripts/fetch_cop_decisions.py`,
+which pulls official decision documents from UN ODS (`daccess-ods.un.org`)
+by document symbol — `FCCC/CP/<year>/.../Add.N`, `FCCC/KP/CMP/<year>/.../Add.N`,
+and `FCCC/PA/CMA/<year>/.../Add.N` for 1995–2024.
 
-- COP final decisions corpus (1,034 PDFs from `unfccc.int/decisions`) — requires polite scraping
-- Pre-2014 Party submissions archive — requires scraping
-- Non-Annex I National Communications and BURs — PDFs per party
+**Why UN ODS instead of `unfccc.int/decisions`**: UNFCCC's main site is shielded
+by Imperva and rejects all programmatic clients (including cloudscraper). UN ODS
+serves the same official text without anti-bot protection.
+
+The script is **idempotent** — re-running it skips files already on disk and only
+fetches missing ones. See [`RESUME.md`](RESUME.md) for how to continue an
+interrupted run.
+
+## Pending sources (not pulled — UNFCCC reachability blocked)
+
+The data plan also calls for:
+
+- 1,034 individual COP decisions on `unfccc.int/decisions` (the collections
+  fetched above contain the same text grouped by session)
+- Pre-2014 Party submissions archive
+- Non-Annex I National Communications and Biennial Update Reports
+
+All three live on `unfccc.int` and require either a headless browser
+(Playwright/Selenium) or manual export. See `RESUME.md` for options.
 
 ## Citation
 

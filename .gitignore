@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 venv/
 *.swp
+
+# do not commit half-written PDFs from an in-progress fetch
+data/raw/cop_decisions/*.tmp
+data/raw/cop_decisions/*.partial
