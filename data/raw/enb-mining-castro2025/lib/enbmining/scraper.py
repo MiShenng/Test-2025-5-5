@@ -1,0 +1,439 @@
+import re
+
+from bs4 import BeautifulSoup, Tag
+
+from .nlp import POSTagger, SentenceTokenizer
+from .parsers import (
+    AgreementParser,
+    InterventionParser,
+    OnBehalfParser,
+    OppositionParser,
+    SupportParser,
+    WhileOppositionParser,
+)
+from .utils import flatten
+
+INTERACTION_PARSERS = [
+    OnBehalfParser,
+    SupportParser,
+    OppositionParser,
+    WhileOppositionParser,
+    AgreementParser,
+]
+
+
+class Scraper:
+
+    """A general scraper for interventions and interactions."""
+
+    def __init__(self, html, issue, parties, groupings):
+        """Initializes the scraper with some HTML, metadata about the ENB
+        issue, and a set of Entities."""
+        self.soup = BeautifulSoup(html, 'lxml')
+        self.issue = issue
+        self.parties = parties
+        self.groupings = groupings
+        self.pos_tagger = POSTagger(
+            [party.name for party in parties],
+            [group.name for group in groupings],
+        )
+
+    def scrape(self):
+        # Scraped interventions/interactions (list of list).
+        headsentences = self.extract_sentences()
+        scraped = [
+            self._scrape_from_sentence(sentence, heading)
+            for heading, sentences in headsentences.items()
+            for sentence in sentences
+        ]
+        # Flatten this nested list.
+        return flatten(scraped)
+
+    # The following function extracts a dictionary of headings-subheadings and sentences,
+    # while keeping the current heading and/or subheading until a new one is found.
+    def extract_sentences(self):
+        # Try to find modern HTML structure first
+        content = self.soup.find('section', class_='o-content-from-editor--report')
+        
+        # If not found, try to extract from old HTML structure
+        if content is None:
+            content = self._extract_old_html_content()
+        
+        paragraphs = self._get_paragraphs(content)
+        tokenizer = SentenceTokenizer()
+        headsentences = dict()
+        current_heading2 = None  # Variable to keep track of the current heading level 2
+        current_heading3 = None  # Variable to keep track of the current heading level 3
+        current_heading4 = None  # Variable to keep track of the current heading level 4
+        current_strong_em = None  # Variable to keep track of the current strong_em
+        current_strong = None  # Variable to keep track of the current strong
+        current_heading5 = None  # Variable to keep track of the additional headings
+        current_subheading = None  # Variable to keep track of the current subheading
+
+        for i, paragraph in enumerate(paragraphs):
+            if not isinstance(paragraph, Tag):
+                continue  # Skip if the paragraph is not a Tag object
+            text = paragraph.get_text()
+            text = self._normalize(text)
+
+            # Check for <h2> tags at the correct level
+            if paragraph.name in ['h2']:
+                current_heading2 = paragraph.get_text().strip().rstrip(':').strip()
+                current_heading3 = None   # Reset current_heading3 when a new heading is found
+                current_heading4 = None  # Reset current_heading4 when a new heading is found
+                current_strong_em = None  # Reset strong_em when a new heading is found
+                current_strong = None  # Reset strong when a new heading is found
+                current_heading5 = None  # Reset current_heading5 when a new heading is found
+                current_subheading = None  # Reset subheading when a new heading is found
+                
+                # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                if re.match(rf'^{re.escape(current_heading2)}(:|\s|$)', text):
+                    text = text[len(current_heading2):].strip()
+            else:
+                heading = paragraph.find(['h2'])  # Find heading tagged as <h2> within the paragraph
+                if heading:
+                    current_heading2 = heading.get_text().strip().rstrip(':').strip()
+                    current_heading3 = None   # Reset current_heading3 when a new heading is found
+                    current_heading4 = None  # Reset current_heading4 when a new heading is found
+                    current_strong_em = None  # Reset strong_em when a new heading is found
+                    current_strong = None  # Reset strong when a new heading is found
+                    current_heading5 = None  # Reset current_heading4 when a new heading is found
+                    current_subheading = None  # Reset subheading when a new heading is found
+
+                    # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                    if re.match(rf'^{re.escape(current_heading2)}(:|\s|$)', text):
+                        text = text[len(current_heading2):].strip()
+
+            # Check for <h3> tags at the correct level
+            if paragraph.name in ['h3']:
+                current_heading3 = paragraph.get_text().strip().rstrip(':').strip()
+                current_heading4 = None  # Reset current_heading4 when a new heading is found
+                current_strong_em = None  # Reset strong_em when a new heading is found
+                current_strong = None  # Reset strong when a new heading is found
+                current_heading5 = None  # Reset current_heading5 when a new heading is found
+                current_subheading = None  # Reset subheading when a new heading is found
+                
+                # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                if re.match(rf'^{re.escape(current_heading3)}(:|\s|$)', text):
+                    text = text[len(current_heading3):].strip()
+            else:
+                heading = paragraph.find(['h3'])  # Find heading tagged as <h3> within the paragraph
+                if heading:
+                    current_heading3 = heading.get_text().strip().rstrip(':').strip()
+                    current_heading4 = None  # Reset current_heading4 when a new heading is found
+                    current_strong_em = None  # Reset strong_em when a new heading is found
+                    current_strong = None  # Reset strong when a new heading is found
+                    current_heading5 = None  # Reset current_heading5 when a new heading is found
+                    current_subheading = None  # Reset subheading when a new heading is found
+
+                    # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                    if re.match(rf'^{re.escape(current_heading3)}(:|\s|$)', text):
+                        text = text[len(current_heading3):].strip()
+
+            # Check for <h4> tags at the correct level
+            if paragraph.name in ['h4']:
+                current_heading4 = paragraph.get_text().strip().rstrip(':').strip()
+                current_strong_em = None  # Reset strong_em when a new heading is found
+                current_strong = None  # Reset strong when a new heading is found
+                current_heading5 = None  # Reset current_heading5 when a new heading is found
+                current_subheading = None  # Reset subheading when a new heading is found
+                
+                # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                if re.match(rf'^{re.escape(current_heading4)}(:|\s|$)', text):
+                    text = text[len(current_heading4):].strip()
+            else:
+                heading = paragraph.find(['h4'])  # Find heading tagged as <h4> within the paragraph
+                if heading:
+                    current_heading4 = heading.get_text().strip().rstrip(':').strip()
+                    current_strong_em = None  # Reset strong_em when a new heading is found
+                    current_strong = None  # Reset strong when a new heading is found
+                    current_heading5 = None  # Reset current_heading5 when a new heading is found
+                    current_subheading = None  # Reset subheading when a new heading is found
+
+                    # Remove the heading from the text ONLY if it is at the beginning or followed by a colon
+                    if re.match(rf'^{re.escape(current_heading4)}(:|\s|$)', text):
+                        text = text[len(current_heading4):].strip()
+                    
+            strong_em = next((tag for tag in paragraph.find_all(lambda tag: tag.name == 'strong' and tag.find('em'))), None)  # Find <strong> tag containing <em> tag
+            if strong_em:
+                current_strong_em = strong_em.get_text().strip().rstrip(':').strip()
+                current_strong = None  # Reset strong when a new strong_em is found
+                current_heading5 = None  # Reset current_heading5 when a new heading is found
+                current_subheading = None  # Reset subheading when a new strong_em is found
+                
+                # Remove the strong_em from the text ONLY if it is at the beginning, followed by a colon, or follows a heading
+                if re.match(rf'^{re.escape(current_strong_em)}(:|\s|$)', text):
+                    text = text[len(current_strong_em):].strip()
+            
+            strong = next((tag for tag in paragraph.find_all(lambda tag: tag.name == 'strong' and not tag.find('em'))), None)  # Find <strong> tag not containing <em> tag
+            if strong:
+                current_strong = strong.get_text().strip().rstrip(':').strip()
+                current_heading5 = None  # Reset current_heading5 when a new heading is found
+                current_subheading = None  # Reset subheading when a new strong is found
+                
+                # Remove the strong from the text ONLY if it is at the beginning, followed by a colon, or follows a heading
+                if re.match(rf'^{re.escape(current_strong)}(:|\s|$)', text):
+                    text = text[len(current_strong):].strip()
+
+            additional_heading = self._additional_heading(paragraph)
+            if additional_heading:
+                current_heading5 = paragraph.get_text().strip().rstrip(':').strip()
+                current_subheading = None  # Reset subheading when a new strong is found
+
+                # Remove the current_heading5 from the text ONLY if it is at the beginning, followed by a colon, or follows a heading
+                if re.match(rf'^{re.escape(current_heading5)}(:|\s|$)', text):
+                    text = text[len(current_heading5):].strip()
+             
+            # Check for subheading at the beginning of the paragraph, finishing with a colon but before any full sentence and before any comma
+            subheading_match = re.match(r'^[^.,]*?:', text)
+            if subheading_match:
+                current_subheading = subheading_match.group(0).strip().rstrip(':').strip()  # Extract the subheading and remove any leading or trailing space and trailing colon
+                # Do not remove the subheading from the text, because sometimes relevant parts of sentences are captured in the subheading (e.g.: 'The EU said, inter alia: ')
+            
+            # Concatenate heading, strong_em, strong, and subheading into heading_full with slashes as separators
+            unique_components = list(dict.fromkeys(filter(None, [
+                current_heading2,
+                current_heading3,
+                current_heading4,
+                current_strong_em,
+                current_heading5,
+                current_strong,
+                current_subheading
+            ])))
+            heading_full = ' / '.join(unique_components)
+            
+            if heading_full:
+                heading_full = f'Paragraph {i+1}: {heading_full}'  # Prepend the paragraph index to the heading
+            else:
+                heading_full = f'Paragraph {i+1}'  # Use the paragraph index as the default heading
+
+            # Remove any leading spaces and colons from the text
+            text = re.sub(r'^\s*:?', '', text).strip()
+
+            # Tokenize the cleaned text into sentences
+            sentences = tokenizer.tokenize(text)
+            headsentences[heading_full] = sentences  # Match the heading to the sentences
+
+        return headsentences
+
+    def _extract_old_html_content(self):
+        """Extracts content from old HTML structure.
+        
+        Finds all text between the start marker (first occurrence of a paragraph 
+        containing meeting title/date info) and the end marker (paragraph containing 
+        'THINGS TO LOOK FOR' or similar opinion sections).
+        """
+        # Find all paragraphs in the document
+        all_paragraphs = self.soup.find_all('p')
+        
+        if not all_paragraphs:
+            return None
+        
+        # Find the start index - look for paragraph after the header info
+        # This typically contains date and meeting information
+        start_idx = 0
+        for i, p in enumerate(all_paragraphs):
+            text = p.get_text().strip()
+            # Look for patterns like "2 - 12 June 1998" or "MEETINGS OF THE SUBSIDIARY BODIES"
+            if re.search(r'\d{1,2}\s*-\s*\d{1,2}\s+\w+\s+\d{4}', text) or \
+               'SUBSIDIARY BODIES' in text.upper() or \
+               'FRAMEWORK CONVENTION' in text.upper():
+                start_idx = i
+                break
+        
+        # Find the end index - look for "THINGS TO LOOK FOR" or similar opinion sections
+        end_idx = len(all_paragraphs)
+        for i in range(start_idx, len(all_paragraphs)):
+            text = all_paragraphs[i].get_text().strip()
+            if 'THINGS TO LOOK FOR' in text.upper() or 'IN THE CORRIDORS' in text.upper():
+                end_idx = i
+                break
+        
+        # Create a wrapper div to contain the relevant paragraphs
+        from bs4 import Tag
+        wrapper = self.soup.new_tag('div')
+        for p in all_paragraphs[start_idx:end_idx]:
+            wrapper.append(p)
+        
+        return wrapper
+
+    @staticmethod
+    def _get_paragraphs(content):
+        """Filters only the paragraphs that are relevant, as well as the standalone heading tags.
+
+        In particular, it removes analysis and opinion sections."""
+
+        def is_opinion_paragraph(node):
+            text = node.get_text()
+            opinions = [
+                'BRIEF ANALYSIS OF',
+                'A Brief Analysis of',
+                'THINGS TO LOOK FOR',
+                'IN THE CORRIDORS',
+                'OTHER PRESS BRIEFINGS',
+                'KEEPING THE FOCUS ON PROGRESS',
+                # 'INTERSESSIONAL HIGHLIGHTS', # most of the intersessional highlights can also be deleted if we exclude the issue_type 'curtain-taiser'
+                # 'Intersessional Highlights',
+                'Where are we?',
+                'A Balanced Rulebook',
+                'Making the Concrete Abstract',
+                'The Expectations Gap',
+                'GLOSSARY',
+                'Ambition vs Reality',
+                'This issue of the Earth Negotiations Bulletin',
+            ]
+            return any([opinion in text for opinion in opinions])
+
+        if content is None:
+            return []
+        
+        paragraphs = list()
+        for node in content.children:
+            if type(node) == Tag:
+                # We stop as soon as we see an opinion paragraph.
+                if is_opinion_paragraph(node):
+                    return paragraphs
+                # Keep <p>, <h2>, <h3>, and <h4> tags.
+                elif node.name in ['p', 'h2', 'h3', 'h4']:
+                    paragraphs.append(node)
+        return paragraphs
+
+    def _normalize(self, text):
+        """Normalizes a sentence before it gets tokenized.
+
+        This improves the format of the sentence, so it can be saved as is."""
+        # Rename a.m./p.m. as am/pm.
+        text = re.sub(r'a\.m\.', r'am', text)
+        text = re.sub(r'p\.m\.', r'pm', text)
+        # Rename 'Amb.' as 'Amb'.
+        text = re.sub(r'Amb\.', r'Amb', text)
+        # Add spacing for "andParty" -> "and Party".
+        text = re.sub(r'(and)([A-Z])', r'\1 \2', text)
+        text = re.sub(r'77and', r'77 and', text)
+        # Add spacing between specific party names and "by" or "and" or a given verb.
+        text = re.sub(r'([A-Z][A-Z])(and)', r'\1 \2', text)
+        text = re.sub(r'([A-Z][A-Z])(said)', r'\1 \2', text)
+        text = re.sub(r'(by)([A-Z])', r'\1 \2', text)
+        text = re.sub(r'(AUSTRALIA)(endorsed)', r'\1 \2', text)
+        text = re.sub(r'(AUSTRALIA)(said)', r'\1 \2', text)
+        text = re.sub(r'(Australia)(said)', r'\1 \2', text)
+        text = re.sub(r'(EU)(highlighted)', r'\1 \2', text)
+        # Add spacing before parenthesis.
+        text = re.sub(r'(\w)\(', r'\1 (', text)
+        # Add spacing before dot.
+        text = re.sub(r'\.([A-Z])', r'. \1', text)
+        # Normalize spaces.
+        text = re.sub(r'\r', ' ', text)
+        text = re.sub(r'\n', ' ', text)
+        text = re.sub(r'\xa0+', ' ', text, flags=re.UNICODE)
+        text = re.sub(r'\s\s+', ' ', text)
+        return text
+
+    def _preprocess(self, text):
+        """Prepocesses a sentence before it gets tagged.
+
+        This changes the sentence, so it should not be saved in this format."""
+        # Remove exclamation marks from names (for sentence tokenizer).
+        text = re.sub(r'(Climate Justice Now)!', r'\1', text)
+        text = re.sub(r'(CLIMATE JUSTICE NOW)!', r'\1', text)
+        text = re.sub(r'(CJN)!', r'\1', text)
+        text = re.sub(r'(ACT)!', r'\1', text)
+        # Normalize US$ to prevent parsing interventions for US.
+        text = re.sub(r'US\$', '$', text)
+        # Normalize QELROS so that it's not matched as a city.
+        text = re.sub(r'QELRO[Ss]', 'qelros', text)
+        return text
+
+    # Identify additional headings that have specific text in their own paragraph, but are not tagged as <h2> or <h3>
+    def _additional_heading(self, node):
+        text = node.get_text().strip()
+        headings = [
+            'SBI',
+            'SBI PLENARY',
+            'SBI CONTACT GROUPS',
+            'SBSTA',
+            'SBSTA PLENARY',
+            'SBSTA CONTACT GROUPS',
+            'JOINT SBI/SBSTA',
+            'COP',
+            'COP PLENARY',
+            'COP CONTACT GROUPS',
+            'HIGH-LEVEL SEGMENT',
+            'INFORMAL HIGH-LEVEL PLENARY',
+            'INFORMAL HIGH-LEVEL PLENARY MORNING SESSION',
+            'INFORMAL HIGH-LEVEL PLENARY NIGHT SESSION',
+            'INFORMAL HIGH-LEVEL PLENARY & CONSULTATIONS',
+            'CONTACT GROUP',
+            'CONTACT GROUPS',
+            'CONTACT GROUPS AND INFORMAL CONSULTATIONS',
+            'INFORMAL GROUPS',
+            'INFORMAL MEETINGS',
+            'INFORMAL CONSULTATIONS',
+            'INFORMAL GROUPS AND CONSULTATIONS',
+            'INFORMAL MEETINGS AND CONTACT GROUPS',
+            'NEGOTIATING GROUPS',
+            'NEGOTIATING GROUPS AND INFORMAL CONSULTATIONS',
+            'PLENARY',
+            'OPENING PLENARY',
+            'LATE NIGHT PLENARY',
+            'CLOSING PLENARY',
+            'ROUND TABLE',
+            'ROUND TABLES',
+            'PRESIDENTS GROUP',
+            'MAIN NEGOTIATING GROUP',
+            'INFORMAL DRAFTING GROUP ON CDM TECHNICAL ISSUES',
+            'JOINT WORKING GROUP ON COMPLIANCE',
+            'WELCOMING CEREMONY',
+            'SPECIAL SESSION ON LULUCF AND THE CDM',
+            'NOTE BY THE PRESIDENT OF COP-6',
+            ]
+        return text in headings
+
+
+class InterventionScraper(Scraper):
+    def __init__(self, html, issue, parties, groupings):
+        super().__init__(html, issue, parties, groupings)
+
+    def scrape(self):
+        # Scraped interventions/interactions (list of list).
+        headsentences = self.extract_sentences()
+        scraped = [
+            self._scrape_from_sentence(sentence, heading)
+            for heading, sentences in headsentences.items()
+            for sentence in sentences
+        ]
+        # Flatten this nested list.
+        return flatten(scraped)
+
+    def _scrape_from_sentence(self, sentence, heading):
+        """Extracts a list of interventions from a sentence."""
+        parser = InterventionParser(
+            sentence, self.issue, self.parties, self.groupings, heading
+        )
+        tagged = self.pos_tagger.tag(self._preprocess(sentence))
+        return parser.parse(tagged)
+
+
+class InteractionScraper(Scraper):
+    def __init__(self, html, issue, parties, groupings):
+        super().__init__(html, issue, parties, groupings)
+
+    def scrape(self):
+        # Scraped interventions/interactions (list of list).
+        headsentences = self.extract_sentences()
+        scraped = [
+            self._scrape_from_sentence(sentence, heading)
+            for heading, sentences in headsentences.items()
+            for sentence in sentences
+        ]
+        # Flatten this nested list.
+        return flatten(scraped)
+
+    def _scrape_from_sentence(self, sentence, heading):
+        """Extracts a list of interactions from a sentence."""
+        tagged = self.pos_tagger.tag(self._preprocess(sentence))
+        interactions = list()
+        for Parser in INTERACTION_PARSERS:
+            parser = Parser(sentence, self.issue, self.parties, self.groupings, heading)
+            interactions.extend(parser.parse(tagged))
+        return interactions

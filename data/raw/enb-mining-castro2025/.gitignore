@@ -1,0 +1,8 @@
+# Python
+*.egg-info
+__pycache__
+*.pyc
+
+# Data
+data/*.csv
+data/html
